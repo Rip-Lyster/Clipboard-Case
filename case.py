@@ -11,6 +11,7 @@ of the problem were simplified to make this script more of a calculation than a 
 1) number of drivers on the app stays constant each month
 2) number of users stays the same each month, number of users lost = number of users acquired each month
 3) user acquisition costs have an inverse relationship with the number of users being acquired
+4) there exists a linear relationship between positive ride match rate and lyft's take
 
 # IGNORED DETAILS #
 "but riders who experience one or more “failed to find driver” events churn at 33% monthly"
@@ -78,12 +79,11 @@ def calculate_user_acquisition_cost(users_added):
     user_cost_func = np.frompyfunc(user_cost, 1, 1)
 
     acquisition_cost_per_user = user_cost_func(users_added)
-    print(acquisition_cost_per_user)
 
     return users_added * acquisition_cost_per_user
 
-#----------------------------------------------------------#
 
+#----------------------------------------------------------#
 ## CALCULATING DRIVER RELATED COSTS ##
 
 ## SETTING COEFFICIENTS FOR USER ACQUISITION COST vs NUM USERS ACQUIRED
@@ -116,46 +116,74 @@ def calculate_driver_acquisition_cost(drivers_added):
     driver_cost_func = np.frompyfunc(driver_cost, 1, 1)
 
     acquisition_cost_per_driver = driver_cost_func(drivers_added)
-    print(acquisition_cost_per_driver)
 
     return drivers_added * acquisition_cost_per_driver
 
-#----------------------------------------------------------#
 
+#----------------------------------------------------------#
 ## CALCULATING POSITIVE MATCH RATE FROM LINEAR RELATIONSHIP WITH LYFT TAKE ##
 
-## SETTING LINEAR COEFFICIENTS FOR MATCH RATE VS LYFT TAKE
-x = np.array([3,6])
-y = np.array([0.93, 0.6])
-coefficients = np.polyfit(x, y, 1)
+# ## SETTING LINEAR COEFFICIENTS FOR MATCH RATE VS LYFT TAKE
+# x = np.array([3,6])
+# y = np.array([0.93, 0.6])
+# coefficients = np.polyfit(x, y, 1)
+
+## SETTING COEFFICIENTS FOR MATCH RATE VS LYFT TAKE
+# Want an inverse function where match rate goes to 1 as lyft take goes to negative infinity
+# y = a/(x+b) + c
+# Know points ([lyft take, match rate]): [3,0.93], [6, 0.6]
+# y = a/(x-(73/11)) + 1
+# y = (28/110)/(x+(-73/11)) + 1
+match_a = 14/55
+match_b = -1*(73/11)
+match_c = 1
+
+def match_rate(lyft_take):
+    """ufunc numpy function for calculating positive match rate
+
+    Args:
+        lyft_take (float): dollar amount that lyft will take as a fee
+
+    Returns:
+        float: positive match rate of trip @ lyft take
+    """
+    return match_a/(lyft_take+match_b) + match_c
 
 def positive_match_from_lyft_take_linear(lyft_take):
-    # find linear coefficients
-    # ASSUMPTION: relationship between positive match and lyft take is linear
+    """calculate match rate from a numpy array of lyft takes
 
-    new_y = coefficients[0]*lyft_take + coefficients[1]
-    new_y = np.minimum(1.0, new_y)
-    new_y = np.maximum(0.0, new_y)
+    Args:
+        lyft_take (float[]): dollar amount that lyft will take as a fee in a numpy array
 
-    return new_y
+    Returns:
+        float[]: positive match rate of trip in a numpy array
+    """
+    match_rate_func = np.frompyfunc(match_rate, 1, 1)
 
+    match_rate_array = match_rate_func(lyft_take)
 
+    return match_rate_array
+
+#----------------------------------------------------------#
 ## MAIN SCRIPT ##
 if __name__ == '__main__':
-    fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, figsize=(10, 8))
+    # setting up plots
+    fig, (ax1, ax2) = plt.subplots(figsize=(10, 8), nrows=2, ncols=1)
+
     ax1.set_title('User & Driver Acquisition Costs vs. Lyft\'s Take')
-    ax2.set_title('Revenue, Cost, & Profit vs. Lyft\'s Take')
     ax1.set_xlabel('Lyft\'s Take')
     ax1.set_ylabel('$')
+
+    ax2.set_title('Revenue, Cost, & Profit vs. Lyft\'s Take')
     ax2.set_xlabel('Lyft\'s Take')
     ax2.set_ylabel('$')
-    ax1.set_xlim(-0.5, 15.5)
-    ax1.set_ylim(0, 3500)
-    ax2.set_xlim(-0.5, 15.5)
-    ax2.set_ylim(-4000, 4000)
+
+    fig.suptitle("Real Problems We Tackle: Pricing #1 @ 1000 Users", fontsize=16)
 
     # numpy array for all possible fees by lyft
-    lyft_take_array = np.linspace(0,15.0,1500)
+    lyft_take_array = np.linspace(0,6.22,622)
+
+    # zero array for reference
 
     #----------------------------------#
     ## MONTHLY PROFIT
@@ -176,7 +204,7 @@ if __name__ == '__main__':
     users_lost_array = initial_num_users*(match_rate_array*rider_success_match_churn + fail_rate_array*rider_failed_match_churn)
 
     # calculating number of drivers lost in a given month
-    drivers_lost_array = np.full(1500, initial_num_drivers * driver_churn)
+    drivers_lost_array = np.full(622, initial_num_drivers * driver_churn)
 
     # calculating user acquisition costs from number of users lost
     user_acquisition_cost = calculate_user_acquisition_cost(users_lost_array)
@@ -203,6 +231,9 @@ if __name__ == '__main__':
                 xy=(max_revenue[0], revenue_array.max()),
                 xytext=(10, 1), textcoords='offset pixels', fontsize=10)
     
+    ax2.axhline(0, linestyle='dotted', color='black')
+    
+    #----------------------------------#
     # final plotting
     ax1.legend()
     ax2.legend()
